@@ -26,7 +26,31 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
+variable "management_cidr" {
+  description = "CIDR block allowed for SSH access"
+  type        = string
+}
 # TODO: Add variables for:
 # - Node group instance types and sizing
 # - S3 bucket names
 # - Any other configurable parameters your infrastructure needs
+
+
+# Node group instance types and sizing
+variable "general_node_group" {
+  type = object({
+    instance_types = list(string)
+    min_size       = number
+    max_size       = number
+    desired_size   = number
+  })
+}
+
+variable "gpu_node_group" {
+  type = object({
+    instance_types = list(string)
+    min_size       = number
+    max_size       = number
+    desired_size   = number
+  })
+}
