@@ -54,3 +54,28 @@ variable "gpu_node_group" {
     desired_size   = number
   })
 }
+
+variable "video_chunks_bucket_name" {
+  description = "Existing S3 bucket for raw video chunks"
+  type        = string
+}
+
+variable "enable_general_spot" {
+  description = "Enable Spot instances for general workloads"
+  type        = bool
+  default     = true
+}
+
+variable "general_spot_node_group" {
+  description = "Configuration for general Spot node group"
+  type = object({
+    min_size     = number
+    desired_size = number
+    max_size     = number
+  })
+  default = {
+    min_size     = 0
+    desired_size = 1
+    max_size     = 6
+  }
+}
