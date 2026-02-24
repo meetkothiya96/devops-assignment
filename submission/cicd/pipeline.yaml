@@ -13,3 +13,189 @@
 #
 # The application is a Java service built with Gradle, containerized,
 # deployed to EKS via kubectl/helm.
+
+
+name: Video Analytics CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: video-analytics
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+
+  # -------------------------------
+  # BUILD & UNIT TEST
+  # -------------------------------
+  build:
+    name: Build & Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Build & run unit tests
+        run: |
+          ./gradlew clean build test
+
+      - name: Archive test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: build/reports/tests/
+
+  # -------------------------------
+  # INTEGRATION TESTS & SECURITY
+  # -------------------------------
+  test:
+    name: Integration Tests & Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+
+      - name: Run integration tests
+        run: |
+          ./gradlew integrationTest
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: $ECR_REPOSITORY:$IMAGE_TAG
+          severity: HIGH,CRITICAL
+          exit-code: 1
+
+  # -------------------------------
+  # DEPLOY TO STAGING
+  # -------------------------------
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: $AWS_REGION
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push image to ECR
+        run: |
+          docker tag $ECR_REPOSITORY:$IMAGE_TAG \
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
+
+      - name: Update kubeconfig (staging)
+        run: |
+          aws eks update-kubeconfig \
+            --name video-analytics-staging \
+            --region $AWS_REGION
+
+      - name: Deploy to EKS (staging)
+        run: |
+          helm upgrade --install video-analytics ./helm \
+            --namespace staging \
+            --set image.tag=$IMAGE_TAG
+
+  # -------------------------------
+  # MANUAL APPROVAL FOR PROD
+  # -------------------------------
+  approve-prod:
+    name: Manual Approval for Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    environment:
+      name: production
+    steps:
+      - name: Await approval
+        run: echo "Waiting for manual approval to deploy to production"
+
+  # -------------------------------
+  # DEPLOY TO PRODUCTION
+  # -------------------------------
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: approve-prod
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: $AWS_REGION
+
+      - name: Update kubeconfig (prod)
+        run: |
+          aws eks update-kubeconfig \
+            --name video-analytics-prod \
+            --region $AWS_REGION
+
+      - name: Deploy to EKS (prod)
+        run: |
+          helm upgrade --install video-analytics ./helm \
+            --namespace prod \
+            --set image.tag=$IMAGE_TAG
+
+  # -------------------------------
+  # ROLLBACK ON FAILURE
+  # -------------------------------
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    if: failure()
+    needs: [deploy-production]
+
+    steps:
+      - name: Rollback Helm release
+        run: |
+          helm rollback video-analytics
+
+  # -------------------------------
+  # NOTIFICATIONS
+  # -------------------------------
+  notify:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    if: failure()
+
+    steps:
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "🚨 CI/CD Pipeline Failed for Video Analytics\nRepository: ${{ github.repository }}\nCommit: ${{ github.sha }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
