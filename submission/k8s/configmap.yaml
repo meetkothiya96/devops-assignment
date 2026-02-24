@@ -5,3 +5,46 @@
 # Requirements:
 #   - Application configuration values (e.g., log level, Kafka broker, S3 bucket)
 #   - This ConfigMap should be referenced in your deployment.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: video-processor-config
+  namespace: video-analytics
+  labels:
+    app: video-processor
+data:
+  # -------------------------------
+  # Application settings
+  # -------------------------------
+  APP_NAME: "video-processor"
+  LOG_LEVEL: "INFO"
+  ENVIRONMENT: "production"
+
+  # -------------------------------
+  # Kafka / Streaming configuration
+  # -------------------------------
+  KAFKA_BROKERS: "b-1.msk-cluster.us-east-1.amazonaws.com:9092,b-2.msk-cluster.us-east-1.amazonaws.com:9092"
+  KAFKA_TOPIC_INPUT: "video-fragments"
+  KAFKA_TOPIC_OUTPUT: "processed-video"
+  KAFKA_CONSUMER_GROUP: "video-processor-group"
+
+  # -------------------------------
+  # S3 configuration
+  # -------------------------------
+  S3_VIDEO_BUCKET: "video-analytics-processed"
+  S3_REGION: "us-east-1"
+  S3_UPLOAD_PREFIX: "processed/"
+
+  # -------------------------------
+  # Service configuration
+  # -------------------------------
+  HTTP_PORT: "8080"
+  MAX_BATCH_SIZE: "50"
+  PROCESSING_TIMEOUT_SECONDS: "30"
+
+  # -------------------------------
+  # Health check paths
+  # -------------------------------
+  HEALTH_LIVENESS_PATH: "/health/live"
+  HEALTH_READINESS_PATH: "/health/ready"
